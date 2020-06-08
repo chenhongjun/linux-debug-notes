@@ -307,7 +307,7 @@ strace -p $(pgrep app) # 利用shell语法生成app进程的pid，直接strace
 ###### 内存泄漏
 
 ```shell
-#内存紧张时，系统通过回写脏页、利用swap，最终OOM （Out of Memory）机制杀死占用内存最多的进程
+#内存紧张时，系统通过回写脏页回收缓存页、利用swap，最终OOM （Out of Memory）机制杀死占用内存最多的进程
 vmstat 1 #每秒1次打印内存信息
 # pmap -x 查看进程内存分布
 
@@ -317,9 +317,75 @@ vmstat 1 #每秒1次打印内存信息
 /usr/share/bcc/tools/memleak -a -p $(pidof app) #pidof如果有多个结果不换行，pgrep有多个结果时换行
 ```
 
+###### swap
 
+回写脏页的两种方式：
 
+1：系统调用fsync，将脏页同步写到磁盘中
 
+2：内核线程pdflush负责刷新脏页数据到磁盘中
+
+swap机制，不能回收的不活跃页，就使用swap机制换到磁盘分区，用到时再换回内存。也可以用来实现开机恢复上次运行状态
+
+使用swap分区的情况：
+
+1：直接内存回收：有内存分配请求但剩余内存不够时，会触发系统通过swap回收内存用来响应内存分配请求
+
+2：kswapd0：专门的内核线程定期swap回收内存。一旦剩余内存小于pages_low，就会触发内存的swap回收
+
+![img](./c1054f1e71037795c6f290e670b29120.png)
+
+可以通过内核选项/proc/sys/vm/min_free_kbytes设置pages_min，然后内核自动得出其他值：
+
+pages_low = pages_min * 5/4
+pages_high = pages_min * 3/2
+
+**numa 与 swap**
+
+Non-Uniform Memory Access 处理器架构:多个处理器被划分到不同的node上，每个node拥有自己的本地内存空间。同一个node内部，进一步分为不同的内存域(zone)，直接内存访问区(DMA)/普通内存区(NORMAL)/伪内存区(MOVABLE) 等
+
+![img](./be6cabdecc2ec98893f67ebd5b9aead9.png)
+
+```shell
+# 查看处理器再node的分布情况，以及每个node的内存使用情况
+numactl --hardware
+available: 1 nodes (0)
+node 0 cpus: 0 1
+node 0 size: 7977 MB
+node 0 free: 4416 MB
+...
+#示例输出为1核心2线程
+
+#通过/proc/zoneinfo [内存域在proc中的接口]观察 页最小阈值[min]、页低阈值[low]和页高阈值[high]
+$ cat /proc/zoneinfo
+...
+Node 0, zone   Normal
+ pages free     227894 #剩余内存页数
+       min      14896 #pages_min
+       low      18620 #pages_low
+       high     22344 #pages_high
+...
+     nr_free_pages 227894 #剩余内存页数
+     nr_zone_inactive_anon 11082 #非活跃匿名页数
+     nr_zone_active_anon 14024 #活跃匿名页数
+     nr_zone_inactive_file 539024 #非活跃文件页数
+     nr_zone_active_file 923986 #活跃文件页数
+...
+
+# 当一个node内存不足时：cat /proc/sys/vm/zone_reclaim_mode
+# 0：可以去其他node寻找空闲内存,也可以从本地回收内存
+# 1：从本地回收内存。
+# 2：从本地回收内存。可以回写脏数据回收内存
+# 4：从本地回收内存。可以用swap回收内存
+```
+
+**swappiness**
+
+对文件页的回收，当然就是直接回收缓存，或者把脏页写回磁盘后再回收。
+
+而对匿名页的回收，其实就是通过 Swap 机制，把它们写入磁盘后再释放内存。
+
+/proc/sys/vm/swappiness  值域为[0,100]，越大系统越倾向于回收匿名页。
 
 
 
