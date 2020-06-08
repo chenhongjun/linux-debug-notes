@@ -1,8 +1,8 @@
-![img](.\920601da775da08844d231bc2b4c301d.png)
+![img](./920601da775da08844d231bc2b4c301d.png)
 
 
 
-![img](.\9ee6c1c5d88b0468af1a3280865a6b7a.png)
+![img](./9ee6c1c5d88b0468af1a3280865a6b7a.png)
 
 # CPU
 
@@ -103,11 +103,11 @@ cpu1 926280 104 264630 1323075364 23700 0 111 0 0 0
 #guest_nice (since Linux 2.6.33) (10) Time spent running a niced guest (virtual CPU for guest operating systems under the control of the Linux kernel).
 ```
 
-![image-20200605153013090](.\image-20200605153013090.png)
+![image-20200605153013090](./image-20200605153013090.png)
 
 各种性能工具:取开始和结束的值，计算一小段时间内的使用率，然后显示:
 
-![img](.\8408bb45922afb2db09629a9a7eb1d5a.png)
+![img](./8408bb45922afb2db09629a9a7eb1d5a.png)
 
 top:默认起始间隔3秒，3秒刷新一次；
 
@@ -126,7 +126,7 @@ perf top #类似于top命令的交互界面,显示CPU始终占用的进程函数
 perf top -g -p 21515# -g 开启调用关系采样;-p指定进程id;
 ```
 
-![image-20200605154829171](.\image-20200605154829171.png)
+![image-20200605154829171](./image-20200605154829171.png)
 
 Samples:perf采样事件数量，过少的话可能不准
 
