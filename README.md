@@ -304,12 +304,53 @@ pcstat /bin/ls #查看ls文件的缓存情况
 strace -p $(pgrep app) # 利用shell语法生成app进程的pid，直接strace
 ```
 
+centos7升级内核
+
+```shell
+# 升级系统
+yum update -y
+
+# 安装ELRepo
+rpm --import https://www.elrepo.org/RPM-GPG-KEY-elrepo.org
+rpm -Uvh https://www.elrepo.org/elrepo-release-7.0-3.el7.elrepo.noarch.rpm
+
+# 安装新内核
+yum remove -y kernel-headers kernel-tools kernel-tools-libs
+yum --enablerepo="elrepo-kernel" install -y kernel-ml kernel-ml-devel kernel-ml-headers kernel-ml-tools kernel-ml-tools-libs kernel-ml-tools-libs-devel
+
+# 更新Grub后重启
+grub2-mkconfig -o /boot/grub2/grub.cfg
+grub2-set-default 0
+reboot
+
+# 重启后确认内核版本已升级为4.20.0-1.el7.elrepo.x86_64
+uname -r
+```
+
+安装bcc-tools
+
+```shell
+
+# 安装bcc-tools
+yum install -y bcc-tools
+
+# 配置PATH路径
+export PATH=$PATH:/usr/share/bcc/tools
+
+# 验证安装成功
+cachestat 
+```
+
 ###### 内存泄漏
 
 ```shell
 #内存紧张时，系统通过回写脏页回收缓存页、利用swap，最终OOM （Out of Memory）机制杀死占用内存最多的进程
 vmstat 1 #每秒1次打印内存信息
 # pmap -x 查看进程内存分布
+
+# cgroups:限制进程资源，保证系统内存不会被异常进程耗尽
+# proc/pid/oom_adj 调整核心应用的oom_score，保证内存紧张进程也不被OOM杀死，值越大越容易被OOM杀死
+dmesg | grep -i "Out of memory" # OOM杀死进程后查看OOM日志
 
 # memleak:bcc软件包中的一个工具,用于检测内存泄漏[valgrind也可以检测内存泄漏]
 # -a 表示显示每个内存分配请求的大小以及地址
@@ -432,9 +473,30 @@ smem --sort swap # 将进程按照swap使用量排序显示
 #mlock()/mlockall()库函数可以锁定内存，阻止它们被换出到swap分区
 ```
 
+![img](./e28cf90f0b137574bca170984d1e6736.png)
 
+```shell
+# 工具总结
+free
+vmstat
+sar
+ps
+top
+pmap
+cachestat
+cachetop
+memleak # 内存泄漏检测
+valgrind # 内存泄漏检测
+systemtap # 动态追踪
+pcstat
+/proc/meminfo
+/proc/pid/status
+/proc/pid/smaps
+```
 
 # I/O
+
+
 
 
 
@@ -442,7 +504,13 @@ smem --sort swap # 将进程按照swap使用量排序显示
 
 
 
+
+
+
+
 # 综合
+
+
 
 
 
