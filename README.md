@@ -387,6 +387,51 @@ Node 0, zone   Normal
 
 /proc/sys/vm/swappiness  值域为[0,100]，越大系统越倾向于回收匿名页。
 
+```shell
+# 开启swap
+# 创建Swap文件
+$ fallocate -l 8G /mnt/swapfile
+# 修改权限只有根用户可以访问
+$ chmod 600 /mnt/swapfile
+# 配置Swap文件
+$ mkswap /mnt/swapfile
+# 开启Swap
+$ swapon /mnt/swapfile
+
+$ free # 查看
+
+$ swapoff -a # 关闭swap
+$ swapoff -a && swapon -a # 关闭再打开，达到清空swap的效果
+
+# -r表示显示内存使用情况，-S表示显示Swap使用情况
+$ sar -r -S 1 # 间隔1秒输出一组数据
+04:39:56    kbmemfree   kbavail kbmemused  %memused kbbuffers  kbcached  kbcommit   %commit  kbactive   kbinact   kbdirty
+04:39:57      6249676   6839824   1919632     23.50    740512     67316   1691736     10.22    815156    841868         4
+
+04:39:56    kbswpfree kbswpused  %swpused  kbswpcad   %swpcad
+04:39:57      8388604         0      0.00         0      0.00
+# kbcommit 当前系统负载需要的内存[估值]
+# kbactive 活跃内存
+# kbinact 非活跃，可能被回收
+
+# cachetop观察缓存使用情况
+cachetop 5
+
+# 查看进程swap换出到swap的虚拟内存大小
+/proc/pid/status 中的 VmSwap
+# 按VmSwap使用量对进程排序，输出进程名称、进程ID以及SWAP用量
+$ for file in /proc/*/status ; do awk '/VmSwap|Name|^Pid/{printf $2 " " $3}END{ print ""}' $file; done | sort -k 3 -n -r | head
+dockerd 2226 10728 kB
+docker-containe 2251 8516 kB
+snapd 936 4020 kB
+networkd-dispat 911 836 kB
+polkitd 1004 44 kB
+
+smem --sort swap # 将进程按照swap使用量排序显示
+
+#mlock()/mlockall()库函数可以锁定内存，阻止它们被换出到swap分区
+```
+
 
 
 # I/O
