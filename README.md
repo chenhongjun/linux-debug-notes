@@ -1,6 +1,26 @@
+# 日志救不了程序员
+
+服务端程序上线后，总是会出现一些奇奇怪怪的问题，查到最后，要么是程序bug，要么是环境问题，要么是错误操作问题。那么问题来了，问题出现的时候，一般是用户或者运维先发现，再层层转达，最后可能交到程序员来排查。
+
+作为一名被线上问题困扰已久的程序员，我知道线上问题是永远规避不完的，明确的需求和稳定/良好的代码风格/全面覆盖的测试用例只能减少线上问题，但总是会漏掉那么一些。bug一词的来源也是服务器上飞了一只虫子导致的机器问题。当然线上问题不止功能问题，也包含性能问题。
+
+当线上问题传达到我的耳朵里时，很可能带有一定的迷惑性，因为我听到的只是现象。而最终现象和问题根源可能距离较远，直接联想可能很难想到，可能真是因为很难联想到它们之间的相关关系，才会让它在前面的阶段漏掉，再在线上跳出来。
+
+一般排查线上问题，我会从两个层面去排查：1.程序层面，2.系统层面.
+
+程序层面一般看程序日志，但有时日志没有覆盖到问题。系统层面就看系统日志，但是系统日志就更少了。所以我在查问题时，单看日志是很难看出问题的，如果问题到了程序员这一层，一般都是靠日志是看不出来的问题。特别是之前在做网络块设备服务时，一般遇到的都是性能问题，例如要求64KB大小的块的读延迟在1ms以内，这种时候，就连linux内核里面一个不起眼的策略配置，或者是网络稍微抖一下，都会导致最终看到的结果是大于1ms。这些时候，更需要合理使用性能排查工具观察问题出在哪里。
+
+幸亏，linux提供了像/proc虚拟文件系统，perf采样，动态追踪等技术，并且市面上有完备的便捷工具，覆盖了几乎每一个点，能够让我们从各个角度去观察进程和系统内核，去观察每一个细节，把问题根源定位出来。(什么？你的程序没跑在linux上？)
+
+以下是我学习倪鹏飞的《linux性能优化》作的笔记，记录了计算机的一些重要资源的观察方法。其中有一些还未完善的点，日后有时间一一补充。另外可以参考书籍《性能之巅》，里面也提供了大量工具和方法。
+
+当然，我不是运维工程师，通过观察线上系统的运行状态，不仅仅能收获一种排查定位问题的方法，观察自己写的程序的运行期行为，更能理解linux的运作原理。
+
+以下是线上服务器的软件堆栈图
+
 ![img](./920601da775da08844d231bc2b4c301d.png)
 
-
+以下是观察各个层面/角度提供的工具
 
 ![img](./9ee6c1c5d88b0468af1a3280865a6b7a.png)
 
@@ -502,7 +522,7 @@ pcstat
 
 inode:记录文件元数据
 
-dentry:记录文件名/inode指针/dentry关系(用于构成目录结构)，也是当作文件存起来
+dentry:记录文件名/inode指针/dentry关系(用于构成目录结构)，从磁盘加载后作为特殊文件放到内存
 
 ![img](./328d942a38230a973f11bae67307be47.png)
 
@@ -535,6 +555,8 @@ O_DSYNC：数据写入磁盘才返回
 net socket:
 
 O_ASYNC：异步IO
+
+###### 工具
 
 ```shell
 df -h /dev/sda1 # 查看文件系统的磁盘空间使用情况
@@ -569,9 +591,140 @@ dentry             76050 121296    192   21    1 : tunables    0    0    0 : sla
 slabtop # 按下c按照缓存大小排序，按下a按照活跃对象数排序
 ```
 
+SATA & SSD : 接口/传输通道/传输协议 : RAID/分区
 
+**通用块层**
 
+在文件系统和磁盘驱动中间的一个抽象层，用于上下层接口封装抽象，还会给文件系统发来的IO请求排队并优化(重排序/请求合并等)。
 
+排序：4种可选的IO调度算法
+
+NONE:无任何处理
+
+NOOP:FIFO队列，做基本的请求合并，常用于SSD
+
+CFQ:完全公平调度器，每个进程一个IO调度队列，按时间片把IO处理机会均匀分给每个进程，适合进程数多的系统
+DeadLine:读写请求分别创建IO队列，并确保达到deadline的请求优先处理，多用于IO压力重的场景
+
+*Linux I/O栈=文件系统+通用块层+设备层*
+
+**磁盘性能指标**
+
+使用率：磁盘处理IO的时间百分比，没考虑IO的大小
+
+饱和度：磁盘处理IO的繁忙程度，100%则无法接受新IO请求
+
+IOPS：每秒IO次数
+
+吞吐量：每秒IO的数据量
+
+响应时间：从发出请求到收到响应的时间间隔
+
+```shell
+# 观察每块磁盘的使用情况
+iostat -d -x 1 #-d -x表示显示所有磁盘I/O的指标
+Device            r/s     w/s     rkB/s     wkB/s   rrqm/s   wrqm/s  %rrqm  %wrqm r_await w_await aqu-sz rareq-sz wareq-sz  svctm  %util 
+loop0            0.00    0.00      0.00      0.00     0.00     0.00   0.00   0.00    0.00    0.00   0.00     0.00     0.00   0.00   0.00 
+sda              0.00    0.00      0.00      0.00     0.00     0.00   0.00   0.00    0.00    0.00   0.00     0.00     0.00   0.00   0.00 
+# 输出列含义依次是：
+# 每秒发给磁盘的读/写 请求数 数据量[KB]
+# 每秒合并的读/写 请求数 百分比
+# 读/写 请求处理完成等待的时间[包括通用块层排队时间+设备实际处理时间]
+# 请求队列平均长度
+# 每个读/写请求平均大小[KB]
+# 处理IO请求所需的平均时间[ms，不包括等待时间，推断数据]
+# 磁盘处理IO的所花时间占总时间的百分比
+
+# 观察每个进程的IO情况
+pidstat -d 1 
+13:39:51      UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s iodelay  Command 
+13:39:52      102       916      0.00      4.00      0.00       0  rsyslogd
+# 每秒读取的数据大小/写请求数据大小/取消写请求数据大小/块IO延迟[包括等待同步块IO和换入块IO的时间]/
+
+# iotop 类top命令 观察IO较大的进程排名
+iotop
+
+lsof -p $pid #查看进程打开的文件，可以和strace打印的的系统调用对应上，包括各种类型的文件
+strace -T -tt -pf $pid # -f 多线程进程时，-f能观察除主线程外的其他线程的系统调用，-T显示系统调用所用时长，-tt显示跟踪时间
+pstree -t -a -p $pid # 查看进程树。-t表示线程，-a表示显示命令行参数
+```
+
+```shell
+# filetop,跟踪内核中文件读写情况，并输出线程ID/读写大小/读写类型/文件名称，bcc软件包的一部分
+./filetop -C #-C 选项表示输出新内容时不清空屏幕
+ps -efT # -T显示线程ID,和filetop命令的输出对应上
+
+# opensnoop 跟踪内核中的open系统调用，属于bcc软件包
+opensnoop
+```
+
+```shell
+# nsenter 能进入linux namespace
+nsenter --target $PID --net -- lsof -i # --net进入net namespace;lsod -i显示tcp socket文件的tcp连接信息
+```
+
+###### fio
+
+```shell
+# 磁盘的性能如何，操作系统没有提供接口去查询，只有通过实际测试去测出磁盘的性能，fio是一个很好的测试工具
+# 使用例子
+# 随机读
+fio -name=randread -direct=1 -iodepth=64 -rw=randread -ioengine=libaio -bs=4k -size=1G -numjobs=1 -runtime=1000 -group_reporting -filename=/dev/sdb
+
+# 随机写
+fio -name=randwrite -direct=1 -iodepth=64 -rw=randwrite -ioengine=libaio -bs=4k -size=1G -numjobs=1 -runtime=1000 -group_reporting -filename=/dev/sdb
+
+# 顺序读
+fio -name=read -direct=1 -iodepth=64 -rw=read -ioengine=libaio -bs=4k -size=1G -numjobs=1 -runtime=1000 -group_reporting -filename=/dev/sdb
+
+# 顺序写
+fio -name=write -direct=1 -iodepth=64 -rw=write -ioengine=libaio -bs=4k -size=1G -numjobs=1 -runtime=1000 -group_reporting -filename=/dev/sdb 
+
+# direct，表示是否跳过系统缓存。上面示例中，我设置的 1 ，就表示跳过系统缓存。
+# iodepth，表示使用异步 I/O（asynchronous I/O，简称 AIO）时，同时发出的 I/O 请求上限。在上面的示例中，我设置的是 64。
+# rw，表示 I/O 模式。我的示例中， read/write 分别表示顺序读 / 写，而 randread/randwrite 则分别表示随机读 / 写。
+# ioengine，表示 I/O 引擎，它支持同步（sync）、异步（libaio）、内存映射（mmap）、网络（net）等各种 I/O 引擎。上面示例中，我设置的 libaio 表示使用异步 I/O。
+# bs，表示 I/O 的大小。示例中，我设置成了 4K（这也是默认值）。
+# filename，表示文件路径，当然，它可以是磁盘路径（测试磁盘性能），也可以是文件路径（测试文件系统性能）。示例中，我把它设置成了磁盘 /dev/sdb。不过注意，用磁盘路径测试写，会破坏这个磁盘中的文件系统，所以在使用前，你一定要事先做好数据备份。
+
+# fio输出测试结果
+slat ，是指从 I/O 提交到实际执行 I/O 的时长（Submission latency）；
+clat ，是指从 I/O 提交到 I/O 完成的时长（Completion latency）；
+lat ，指的是从 fio 创建 I/O 到 I/O 完成的总时长。
+对同步 I/O 来说，由于 I/O 提交和 I/O 完成是一个动作，所以 slat 实际上就是 I/O 完成的时间，而 clat 是 0。而从示例可以看到，使用异步 I/O（libaio）时，lat 近似等于 slat + clat 之和。
+
+# fio支持IO重复
+blktrace /dev/sdb # 跟踪磁盘IO行为，生成sdb.blktrace.0 sdb.blktrace.1文件
+blkparse sdb -d sdb.bin # 将结果转化为二进制文件
+fio --name=replay --filename=/dev/sdb --direct=1 --read_iolog=sdb.bin # 使用fio重放日志
+```
+
+```shell
+
+# 工具总结
+fio # 磁盘性能基准测试工具
+iostat
+pidstat
+sar
+dstat
+iotop
+slabtop
+vmstat
+blktrace
+biosnoop
+biotop
+strace
+perf
+df
+mount
+du
+tune2fs
+hdparam
+/proc/slabinfo
+/proc/meminfo
+/proc/diskstats
+/proc/pid/io
+```
 
 # 网络
 
