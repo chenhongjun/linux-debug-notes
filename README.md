@@ -496,6 +496,79 @@ pcstat
 
 # I/O
 
+###### 原理
+
+一切皆文件:所有对象都通过统一的文件系统管理
+
+inode:记录文件元数据
+
+dentry:记录文件名/inode指针/dentry关系(用于构成目录结构)，也是当作文件存起来
+
+![img](./328d942a38230a973f11bae67307be47.png)
+
+抽象一层VFS用于统一接口，支持多种文件系统并存:
+
+基于磁盘的文件系统:ext4,xfs
+
+基于内存的文件系统:/proc, /sys
+
+基于网络的文件系统:NFS，iSCSI
+
+![img](./728b7b39252a1e23a7a223cdf4aa1612.png)
+
+将文件系统挂载到VFS目录树的某个挂载点，才能访问。
+
+缓冲IO 与 非缓冲IO:是否利用标准库访问
+
+直接IO 与 非直接IO:是否跳过系统页缓存（裸IO：跳过文件系统直接读写磁盘设备）
+
+堵塞IO 与 非堵塞IO:IO函数是否会卡住一段时间
+
+同步IO 与 异步IO:调用IO函数是立即得到结果还是通过事件通知
+
+disk file:
+
+O_SYNC：数据和元数据写入磁盘才返回
+
+O_DSYNC：数据写入磁盘才返回
+
+net socket:
+
+O_ASYNC：异步IO
+
+```shell
+df -h /dev/sda1 # 查看文件系统的磁盘空间使用情况
+df -i /dev/sda1 #存储inode的部分使用情况
+```
+
+```shell
+# 与free命令输出的cache是 页缓存和可回收slab缓存的和
+$ cat /proc/meminfo | grep -E "SReclaimable|Cached" 
+Cached:           748316 kB 
+SwapCached:            0 kB 
+SReclaimable:     179508 kB 
+```
+
+```shell
+# 查看slab缓存中，细分到各种文件的缓存
+$ cat /proc/slabinfo | grep -E '^#|dentry|inode' 
+# name            <active_objs> <num_objs> <objsize> <objperslab> <pagesperslab> : tunables <limit> <batchcount> <sharedfactor> : slabdata <active_slabs> <num_slabs> <sharedavail> 
+xfs_inode              0      0    960   17    4 : tunables    0    0    0 : slabdata      0      0      0 
+... 
+ext4_inode_cache   32104  34590   1088   15    4 : tunables    0    0    0 : slabdata   2306   2306      0hugetlbfs_inode_cache     13     13    624   13    2 : tunables    0    0    0 : slabdata      1      1      0 
+sock_inode_cache    1190   1242    704   23    4 : tunables    0    0    0 : slabdata     54     54      0 
+shmem_inode_cache   1622   2139    712   23    4 : tunables    0    0    0 : slabdata     93     93      0 
+proc_inode_cache    3560   4080    680   12    2 : tunables    0    0    0 : slabdata    340    340      0 
+inode_cache        25172  25818    608   13    2 : tunables    0    0    0 : slabdata   1986   1986      0 
+dentry             76050 121296    192   21    1 : tunables    0    0    0 : slabdata   5776   5776      0 
+# dentry 目录项缓存
+# inode_cache VFS索引节点缓存
+# 其他行 各具体文件系统的inode缓存
+
+#实用工具 slabtop
+slabtop # 按下c按照缓存大小排序，按下a按照活跃对象数排序
+```
+
 
 
 
