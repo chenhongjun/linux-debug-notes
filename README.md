@@ -728,7 +728,49 @@ hdparam
 
 # 网络
 
+![img](./c7b5b16539f90caabb537362ee7c27ac.png)
 
+```shell
+# 网络配置，网络接口收发包统计信息
+ethtool eth0 | grep Speed # 网卡最大带宽
+
+ifconfig eth0
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST> mtu 1500 # 没有RUNNING则没插网线
+...
+ip -s addr show dev eth0
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000 # 没有LOWER_UP则没插网线
+...
+# TX和RX中的errors、dropped、overruns、carrier 以及 collisions 等指标不为0时通常表示出现了网络IO问题
+# errors 表示发生错误的数据包数，比如校验错误、帧同步错误等；
+# dropped 表示丢弃的数据包数，即数据包已经收到了 Ring Buffer，但因为内存不足等原因丢包；
+# overruns 表示超限数据包数，即网络 I/O 速度过快，导致 Ring Buffer 中的数据包来不及处理（队列满）而导致的丢包；
+# carrier 表示发生 carrirer 错误的数据包数，比如双工模式不匹配、物理电缆出现问题等；
+# collisions 表示碰撞数据包数；
+
+
+# 套接字信息
+# 推荐使用ss；-l 表示只显示监听套接字；-n 表示显示数字地址和端口(而不是名字)；-p 表示显示进程信息；-t 表示只显示 TCP 套接字
+$ ss -ltnp | head -n 3 # netstat -nlp | head -n 3
+State    Recv-Q    Send-Q        Local Address:Port        Peer Address:Port
+LISTEN   0         128           127.0.0.53%lo:53               0.0.0.0:*        users:(("systemd-resolve",pid=840,fd=13))
+LISTEN   0         128                 0.0.0.0:22               0.0.0.0:*        users:(("sshd",pid=1459,fd=3))
+# 连接状态（Established）时：
+#	Read-Q:还没被应用程序取走的字节数[接收队列长度]
+#	Send-Q:还没有被远端主机确认的字节数[发送队列长度]
+# 监听状态（Listening）时：(全连接：完成了3次握手但还没accept()的套接字)(半连接：收到了第一个SYN包的套接字)
+#	Read-Q:全连接队列的长度
+#	Send-Q:全连接队列的最大长度
+
+$ netstat -s # 查看协议栈信息 ss -s
+
+
+# 网络吞吐和PPS
+sar -n DEV 1
+
+
+# 主机间连通性和延时
+$ ping -c3 114.114.114.114 # -c3表示发送三次ICMP包后停止
+```
 
 
 
