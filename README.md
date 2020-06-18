@@ -142,6 +142,7 @@ ps:默认进程整个生命周期为间隔时间；
 #程序哪行代码费CPU：
 gdb:attach调试进程，但是会中断进程正常执行
 perf:以性能事件采样为基础，分析系统和应用程序的性能问题
+perf list # 列出所有能够触发perf采样点的事件
 perf top #类似于top命令的交互界面,显示CPU始终占用的进程函数或指令排行
 perf top -g -p 21515# -g 开启调用关系采样;-p指定进程id;
 ```
@@ -791,6 +792,163 @@ SO_REUSEPORT选项[Linux 3.9]，多进程可以同时监听相同的接口，内
 DPDK:用户态轮询网卡，大页，CPU绑定，内存对齐，流水线并发等
 
 XDP:和bcc-tools一样，都基于eBPF机制实现。4.8版本以上。
+
+#### 各协议层的性能测试
+
+**转发性能**
+
+```shell
+# ping
+# hping3
+# 高性能网络测试工具pktgen,pktgen作为内核线程运行，需要内核编译时配置过CONFIG_NET_PKTGEN=m，加载pktgen内核模块，然后通过/proc文件系统交互。
+$ modprobe pktgen # 载入内核模块
+$ ps -ef | grep pktgen | grep -v grep
+root     26384     2  0 06:17 ?        00:00:00 [kpktgend_0] #CPU0的内核线程
+root     26385     2  0 06:17 ?        00:00:00 [kpktgend_1] #CPU1的内核线程
+$ ls /proc/net/pktgen/
+kpktgend_0  kpktgend_1  pgctrl # 每个文件与一个内核线程交互，pgctrl用来控制测试的启停
+```
+
+```shell
+#使用pktgen
+# 定义一个工具函数，方便后面配置各种测试选项
+function pgset() {
+    local result
+    echo $1 > $PGDEV
+
+    result=`cat $PGDEV | fgrep "Result: OK:"`
+    if [ "$result" = "" ]; then
+         cat $PGDEV | fgrep Result:
+    fi
+}
+
+# 为0号线程绑定eth0网卡
+PGDEV=/proc/net/pktgen/kpktgend_0
+pgset "rem_device_all"   # 清空网卡绑定
+pgset "add_device eth0"  # 添加eth0网卡
+
+# 配置eth0网卡的测试选项
+PGDEV=/proc/net/pktgen/eth0
+pgset "count 1000000"    # 总发包数量
+pgset "delay 5000"       # 不同包之间的发送延迟(单位纳秒)
+pgset "clone_skb 0"      # SKB包复制
+pgset "pkt_size 64"      # 网络包大小[Byte]
+pgset "dst 192.168.0.30" # 目的IP
+pgset "dst_mac 11:11:11:11:11:11"  # 目的MAC
+
+# 启动测试
+PGDEV=/proc/net/pktgen/pgctrl
+pgset "start"
+
+# 结束后查看测试报告
+$ cat /proc/net/pktgen/eth0
+Params: count 1000000  min_pkt_size: 64  max_pkt_size: 64
+     frags: 0  delay: 0  clone_skb: 0  ifname: eth0
+     flows: 0 flowlen: 0
+...
+Current: # 测试进度
+     pkts-sofar: 1000000  errors: 0
+     started: 1534853256071us  stopped: 1534861576098us idle: 70673us
+...
+Result: OK: 8320027(c8249354+d70673) usec, 1000000 (64byte,0frags) # 测试结果
+  120191pps 61Mb/sec (61537792bps) errors: 0
+```
+
+**TCP/UDP性能**
+
+```shell
+# netperf
+# iperf : yum install iperf3
+# -s表示启动服务端，-i表示汇报间隔，-p表示监听端口
+$ iperf3 -s -i 1 -p 10000 # A机器运行服务端
+# -c表示启动客户端，192.168.0.30为目标服务器的IP
+# -b表示目标带宽(单位是bits/s)
+# -t表示测试时间
+# -P表示并发数，-p表示目标服务器监听端口
+$ iperf3 -c 192.168.0.30 -b 1G -t 15 -P 2 -p 10000 # B机器运行客户端
+```
+
+**HTTP性能**
+
+```shell
+# webbench
+# ab:apache自带的http压测工具
+# Ubuntu
+$ apt-get install -y apache2-utils
+# CentOS
+$ yum install -y httpd-tools
+# -c表示并发请求数为1000，-n表示总的请求数为10000
+$ ab -c 1000 -n 10000 http://192.168.0.30/
+```
+
+**模拟应用负载[模拟用户行为真实负载]**
+
+```shell
+# TCPCopy
+# jmeter
+# LoadRunner
+# wrk: http性能测试工具，内置LuaJIT，可以使用lua构造请求负载
+$ https://github.com/wg/wrk
+$ cd wrk
+$ apt-get install build-essential -y
+$ make
+$ sudo cp wrk /usr/local/bin/
+$ wrk -c 1000 -t 2 http://192.168.0.30/ # 简单使用，-c表示并发连接数1000，-t表示线程数为2
+$ wrk -c 1000 -t 2 -s auth.lua http://192.168.0.30/ # lua脚本参考官方示例
+```
+
+#### DNS解析
+
+DNS服务：应用层协议，基于UDP的较多，一般监听53端口。
+
+```shell
+cat /etc/resolv.conf # DNS服务地址配置
+time nslookup github.com # 查询DNS,获取指定域名对应的IP。time获取nslookup命令的执行时间
+
+# 跟踪DNS服务查询递归过程
+$ dig +trace +nodnssec github.com # +trace表示开启跟踪查询; +nodnssec表示禁止DNS安全扩展
+```
+
+#### tcpdump & wireshark
+
+```shell
+# example 
+$ tcpdump -nn udp port 53 or host 35.190.27.188 # -nn ，表示不解析抓包中的域名（即不反向解析）、协议以及端口号
+#输出格式: 时间戳 协议 源地址.源端口 > 目的地址.目的端口 网络包详细信息
+```
+
+![img](./859d3b5c0071335429620a3fcdde4fff.png)
+
+![img](./4870a28c032bdd2a26561604ae2f7cb3.png)
+
+DoS攻击:Denail of Service，使用大量合理请求占用服务器资源
+
+DDoS攻击:Distributed Denial of Service，在DoS基础上，采用分布式架构，堕胎机器同时攻击目标服务器
+
+```shell
+sysctl net.ipv4.tcp_max_syn_backlog # 查看半连接队列最大容量
+sysctl -w net.ipv4.tcp_max_syn_backlog=1024 # 设置半连接队列最大容量
+sysctl -w net.ipv4.tcp_synack_retries=1 # 设置每个SYN_RECV失败时自动重试次数为1次。默认为5次
+sysctl -w net.ipv4.tcp_syncookies=1 # 开启TCP SYN Cookies，专门防御 SYN Flood 攻击的方法
+cat /etc/sysctl.conf # 以上临时设置想要持久化，需要写到该文件中。
+```
+
+**网络延迟**
+
+Nagle:合并小包，降低网络流量开销，增加网络延迟。
+
+```shell
+$ hping3 -c 3 -S -p 80 baidu.com # -c表示发送3次请求，-S表示设置TCP SYN，-p表示端口号为80
+$ traceroute --tcp -p 80 -n baidu.com # --tcp表示使用TCP协议，-p表示端口号，-n表示不对结果中的IP地址执行反向域名解析
+```
+
+**NAT**
+
+NAT：重写ip报文头中的ip地址。普遍用来解决公网ip地址短缺问题；也用来做网络安全隔离。又根据一些实现方式分为 软件实现/硬件实现；静态[永久]映射/动态映射；
+
+NAPT[内网IP的端口映射为外网IP的一个端口]：SNAT[目标地址不变，只替换源IP和端口]；DNAT[源地址不变，只替换目标IP或端口]；
+
+
 
 # 综合
 
