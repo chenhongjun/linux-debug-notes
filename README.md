@@ -946,7 +946,86 @@ $ traceroute --tcp -p 80 -n baidu.com # --tcp表示使用TCP协议，-p表示端
 
 NAT：重写ip报文头中的ip地址。普遍用来解决公网ip地址短缺问题；也用来做网络安全隔离。又根据一些实现方式分为 软件实现/硬件实现；静态[永久]映射/动态映射；
 
-NAPT[内网IP的端口映射为外网IP的一个端口]：SNAT[目标地址不变，只替换源IP和端口]；DNAT[源地址不变，只替换目标IP或端口]；
+NAPT：内网IP的端口映射为外网IP的一个端口。(SNAT[目标地址不变，只替换源IP和端口]；DNAT[源地址不变，只替换目标IP或端口])；
+
+内核提供Netfilter框架，允许对网络包进行修改.Netfilter提供一整套的hook函数的管理机制[在网络流程中的若干位置放置了一些hook]。[用于路由器，防火墙，NAT，过滤包等功能的实现]
+
+![d31b0ef41bd5ad6e0975ad3887cb39dbb7fd3c50](./d31b0ef41bd5ad6e0975ad3887cb39dbb7fd3c50.png)
+
+
+
+![img](./c6de40c5bd304132a1b508ba669e7b56.png)
+
+table(绿色小方块):
+
+- filter:用于过滤
+- nat:用于nat
+- mangle:用于修改分组数据
+- raw:用于原始数据包
+
+每个table可以包含多条chain(链，白色小方块)，chain用来管理具体的iptables规则，比如：
+
+- filter 表中，内置 INPUT、OUTPUT 和 FORWARD 链
+
+- nat 表中，内置 PREROUTING[路由判断前执行的规则，对接受的包DNAT]、POSTROUTING[路由判断后执行的规则，对发送或转发的包进行SNAT或MASQUERADE]、OUTPUT[类似PREROUTING,但只处理从本机发出去的包] 等
+
+conntrack(灰色小方块)表示连接跟踪模块，它通过内核中的连接跟踪表，记录网络连接状态[iptable -m state(状态过滤)的实现基础]
+
+```shell
+# 基于Netfilter实现以下工具便于配置和管理NAT/防火墙规则：
+# ip6tables
+# ebtables
+# iptables
+# Linux作为NAT[需要打开转发功能]，使用 iptables 配置 NAT 规则：
+# nat table PREROUTING chain config DNAT
+$ iptables -t nat -A PREROUTING -d 100.100.100.100 -j DNAT --to-destination 192.168.0.2 # 为具体IP配置DNAT，并指定转换后的目的地址
+# nat table POSTROUTING chain config SNAT
+$ iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -j MASQUERADE # 为子网配置SNAT
+$ iptables -t nat -A POSTROUTING -s 192.168.0.2 -j SNAT --to-source 100.100.100.100 # 为具体IP配置SNAT，并指定转换后的源地址
+# 同时添加SNAT和DNAT规则
+$ iptables -t nat -A POSTROUTING -s 192.168.0.2 -j SNAT --to-source 100.100.100.100
+$ iptables -t nat -A PREROUTING -d 100.100.100.100 -j DNAT --to-destination 192.168.0.2
+# 查看当前NAT规则
+$ iptables -nL -t nat
+
+# 打开IP转发功能
+$ sysctl net.ipv4.ip_forward
+net.ipv4.ip_forward = 1
+$ sysctl -w net.ipv4.ip_forward=1
+net.ipv4.ip_forward = 1
+$ cat /etc/sysctl.conf | grep ip_forward
+net.ipv4.ip_forward=1
+```
+
+```shell
+# SystemTap:linux的一种动态追踪框架，它把用户提供的脚本，转换为内核模块来执行，用来检测和跟踪内核行为。
+
+# Ubuntu
+apt-get install -y systemtap-runtime systemtap
+# Configure ddebs source
+echo "deb http://ddebs.ubuntu.com $(lsb_release -cs) main restricted universe multiverse
+deb http://ddebs.ubuntu.com $(lsb_release -cs)-updates main restricted universe multiverse
+deb http://ddebs.ubuntu.com $(lsb_release -cs)-proposed main restricted universe multiverse" | \
+sudo tee -a /etc/apt/sources.list.d/ddebs.list
+# Install dbgsym
+apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F2EDC64DC5AEE1F6B9C621F0C8CAB6595FDFF622
+apt-get update
+apt install ubuntu-dbgsym-keyring
+stap-prep
+apt-get install linux-image-`uname -r`-dbgsym
+
+# CentOS
+yum install systemtap kernel-devel yum-utils kernel
+stab-prep
+
+# 使用
+$ stap --all-modules dropwatch.stp # dropwatch.stp为脚本，语法参考网上
+```
+
+```shell
+# 工具总结
+
+```
 
 
 
